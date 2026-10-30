@@ -319,7 +319,8 @@ html,body{background:var(--bg);color:var(--ink)}
 <script>
 /* OPSIONAL: isi di sini supaya tidak perlu memasukkan kode di setiap perangkat.
    Anon key aman ditaruh di sini karena data dilindungi login + Row Level Security. */
-window.AEM_CONFIG = { url: 'https://bvtnchjrwyplmhhgyotu.supabase.co', anonKey: 'sb_publishable_VETMibfY4tTuW9pPk1Q4qw_1gFfDNc6' };
+window.AEM_CONFIG = { url: 'https://bvtnchjrwyplmhhgyotu.supabase.co', anonKey: 'sb_publishable_VETMibfY4tTuW9pPk1Q4qw_1gFfDNc6',
+  users: { cayy: 'jaee0578@gmail.com' } };
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -973,24 +974,31 @@ function renderConnect(msg = '') {
   };
 }
 
+// Login pakai nama: nama -> email diatur di window.AEM_CONFIG.users
+const USERS = (window.AEM_CONFIG && window.AEM_CONFIG.users) || {};
+const HAS_USERS = Object.keys(USERS).length > 0;
+function nameToEmail(v) { v = String(v || '').trim(); if (v.includes('@')) return v; return USERS[v.toLowerCase()] || ''; }
+function emailToName(e) { const k = Object.keys(USERS).find(k => String(USERS[k]).toLowerCase() === String(e || '').toLowerCase()); return k ? k.charAt(0).toUpperCase() + k.slice(1) : e; }
 function renderLogin(mode = 'masuk') {
-  screen(`<div class="tabs" id="lg-tabs" style="width:100%"><button type="button" data-m="masuk" class="${mode === 'masuk' ? 'active' : ''}" style="flex:1">Masuk</button><button type="button" data-m="daftar" class="${mode === 'daftar' ? 'active' : ''}" style="flex:1">Buat akun pertama</button></div>
+  if (HAS_USERS) mode = 'masuk';
+  screen(`${HAS_USERS ? '' : `<div class="tabs" id="lg-tabs" style="width:100%"><button type="button" data-m="masuk" class="${mode === 'masuk' ? 'active' : ''}" style="flex:1">Masuk</button><button type="button" data-m="daftar" class="${mode === 'daftar' ? 'active' : ''}" style="flex:1">Buat akun pertama</button></div>`}
     <form id="login-form">
-      <div class="field"><label>Email</label><input class="input" type="email" name="email" autocomplete="username" required></div>
+      ${HAS_USERS && mode === 'masuk' ? '<div class="field"><label>Nama</label><input class="input" type="text" name="email" autocomplete="username" autocapitalize="none" placeholder="Nama pengguna" required></div>' : '<div class="field"><label>Email</label><input class="input" type="email" name="email" autocomplete="username" required></div>'}
       <div class="field"><label>Password</label><input class="input" type="password" name="password" minlength="8" autocomplete="${mode === 'masuk' ? 'current-password' : 'new-password'}" required>${mode === 'daftar' ? '<span class="hint">Minimal 8 karakter.</span>' : ''}</div>
       <button class="btn primary" style="width:100%;padding:12px" type="submit">${mode === 'masuk' ? 'Masuk' : 'Buat akun'}</button>
     </form>
     <div id="lg-msg"></div>
-    <div class="small faint" style="margin-top:14px;text-align:center"><a href="#" id="lg-reset">Ganti database Supabase</a></div>`);
+    <div class="small faint" style="margin-top:14px;text-align:center">${HAS_USERS ? '' : '<a href="#" id="lg-reset">Ganti database Supabase</a>'}</div>`);
   $$('#lg-tabs button').forEach(b => b.onclick = () => renderLogin(b.dataset.m));
-  $('#lg-reset').onclick = (e) => { e.preventDefault(); renderConnect(); };
+  if ($('#lg-reset')) $('#lg-reset').onclick = (e) => { e.preventDefault(); renderConnect(); };
   $('#login-form').onsubmit = async (e) => {
     e.preventDefault();
     const d = formData(e.target);
+    if (mode === 'masuk') { d.email = nameToEmail(d.email); if (!d.email) return toast('Nama tidak terdaftar.', 'error'); }
     await withBusy(e.target.querySelector('button'), async () => {
       const res = mode === 'masuk' ? await sb.auth.signInWithPassword({ email: d.email, password: d.password }) : await sb.auth.signUp({ email: d.email, password: d.password });
       if (res.error) {
-        const m = /invalid login/i.test(res.error.message) ? 'Email atau password salah.' : /not confirmed/i.test(res.error.message) ? 'Email belum dikonfirmasi. Buka email dari Supabase lalu klik link konfirmasinya.' : res.error.message;
+        const m = /invalid login/i.test(res.error.message) ? (HAS_USERS ? 'Nama atau password salah.' : 'Email atau password salah.') : /not confirmed/i.test(res.error.message) ? 'Email belum dikonfirmasi. Buka email dari Supabase lalu klik link konfirmasinya.' : res.error.message;
         return toast(m, 'error');
       }
       if (!res.data.session) { $('#lg-msg').innerHTML = `<div class="alert info" style="margin-top:14px">${ic('info')}<div class="small">Akun dibuat. Buka email Anda, klik link konfirmasi dari Supabase, lalu kembali ke sini dan pilih <b>Masuk</b>.</div></div>`; return; }
@@ -1013,7 +1021,7 @@ async function boot() {
   LocalAPI.setDb(sb);
   try { await LocalAPI.init(); }
   catch (e) { return screen(`<div class="alert danger">${ic('alert')}<div class="small">${esc(e.message)}</div></div><div class="inline"><button class="btn" id="b-retry">Coba lagi</button><button class="btn" id="b-out">Keluar</button><button class="btn" id="b-cfg">Ganti database</button></div>`), $('#b-retry').onclick = boot, $('#b-out').onclick = logout, $('#b-cfg').onclick = () => renderConnect(); }
-  state.me = { id: 1, name: '', username: session.user.email, email: session.user.email, default_password: false };
+  state.me = { id: 1, name: emailToName(session.user.email), username: session.user.email, email: session.user.email, default_password: false };
   await loadMeta();
   renderShell();
   renderRoute();
@@ -1041,7 +1049,7 @@ function renderShell() {
   }
   const r = route();
   $('.nav').innerHTML = NAV.map(n => `<a href="#/${n.r}" class="${r === n.r ? 'active' : ''}">${ic(n.i)}<span>${n.t}</span></a>`).join('');
-  $('.who-name').textContent = state.me.email || '';
+  $('.who-name').textContent = state.me.name || state.me.email || '';
   const cur = r === 'app' ? routeParam() : null;
   const apps = (state.meta && state.meta.app_counts) || [];
   $('.nav-apps').innerHTML = apps.length ? apps.map(a => `<a href="${appHref(a.app_name)}" class="${cur === a.app_name ? 'active' : ''}">${appDot(a.app_name)}<span class="app-nm">${esc(a.app_name)}</span>
