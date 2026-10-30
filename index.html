@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Rekapan Candy Ress</title>
 <meta name="theme-color" content="#8e1f2b">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Candy Ress">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23c8323f'/%3E%3Cpath d='M16 8v8l5 3' stroke='white' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1024,9 +1029,46 @@ async function boot() {
   state.me = { id: 1, name: emailToName(session.user.email), username: session.user.email, email: session.user.email, default_password: false };
   await loadMeta();
   renderShell();
-  renderRoute();
+  await renderRoute();
+  showReminder();
 }
 async function loadMeta() { state.meta = await GET('/api/meta'); }
+
+// ================= Pasang di HP (PWA) =================
+let installEvt = null;
+const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; });
+window.addEventListener('appinstalled', () => { installEvt = null; toast('Aplikasi terpasang di layar HP 🎉', 'success'); const b = $('#install-btn'); if (b) b.remove(); });
+async function installApp() {
+  if (installEvt) { installEvt.prompt(); try { await installEvt.userChoice; } catch {} installEvt = null; return; }
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  openModal({ title: 'Pasang di layar HP', body: ios
+    ? `<ol style="line-height:1.8;padding-left:20px;margin:0"><li>Buka web ini di <b>Safari</b>.</li><li>Ketuk tombol <b>Bagikan</b> (kotak dengan panah ke atas).</li><li>Pilih <b>Add to Home Screen / Tambahkan ke Layar Utama</b>, lalu <b>Tambah</b>.</li></ol>`
+    : `<ol style="line-height:1.8;padding-left:20px;margin:0"><li>Buka web ini di <b>Chrome</b>.</li><li>Ketuk titik tiga <b>⋮</b> di pojok kanan atas.</li><li>Pilih <b>Instal aplikasi</b> atau <b>Tambahkan ke layar utama</b>, lalu <b>Instal</b>.</li></ol>`,
+    foot: '<button class="btn primary" data-close>Oke</button>' });
+}
+
+// ================= Pengingat saat buka web =================
+const REMIND_KEY = 'aem_remind_';
+async function showReminder(force = false) {
+  let d; try { d = await GET('/api/summary'); } catch { return; }
+  const key = REMIND_KEY + d.today;
+  if (!force) { try { if (localStorage.getItem(key)) return; } catch {} }
+  const segera = d.upcoming.filter(a => a.status === 'segera');
+  const exp = d.overdue, cyc = d.cycles;
+  const total = d.counts.expired + d.counts.segera + cyc.length;
+  if (!total && !force) return;
+  try { localStorage.setItem(key, '1'); } catch {}
+  const row = (a, right, cls) => `<div class="li">${appDot(a.app_name)}<div class="grow"><div class="t">${esc(a.app_name)}</div><div class="s">${esc(a.email)}${a.owner_name ? ' · ' + esc(a.owner_name) : ''}</div></div><span class="days ${cls}">${right}</span></div>`;
+  const sec = (title, n, items) => n ? `<div style="margin-bottom:16px"><div style="font-weight:800;margin-bottom:6px">${title} <span class="faint">(${n})</span></div><div class="list">${items}</div>${n > 5 ? '<div class="small faint" style="margin-top:4px">…dan lainnya, lihat di Daftar Akun.</div>' : ''}</div>` : '';
+  const body = total ? `
+    ${sec('🔴 Sudah expired', d.counts.expired, exp.slice(0, 5).map(a => row(a, daysLabel(a), 'expired')).join(''))}
+    ${sec(`🟡 Segera expired (≤${d.warn_days} hari)`, d.counts.segera, segera.slice(0, 5).map(a => row(a, daysLabel(a), 'segera')).join(''))}
+    ${sec('🔁 Renewal 7 hari ke depan', cyc.length, cyc.slice(0, 5).map(a => row(a, a.next_cycle_days_left === 0 ? 'Hari ini' : a.next_cycle_days_left === 1 ? 'Besok' : a.next_cycle_days_left + ' hari lagi', a.next_cycle_days_left <= 1 ? 'expired' : 'segera')).join(''))}`
+    : '<div class="muted">Semua aman hari ini 🎉 Tidak ada akun yang expired, segera expired, atau jadwal renewal.</div>';
+  openModal({ title: '🔔 Pengingat hari ini', body,
+    foot: `${total ? '<a class="btn" href="#/akun" data-close>Lihat Daftar Akun</a>' : ''}<button class="btn primary" data-close>Oke</button>` });
+}
 window.addEventListener('hashchange', async () => { if (state.me) { document.body.classList.remove('nav-open'); await loadMeta().catch(() => {}); renderShell(); renderRoute(); } });
 
 function renderShell() {
@@ -1038,7 +1080,8 @@ function renderShell() {
         <div class="nav-sec">Aplikasi</div>
         <nav class="nav nav-apps"></nav>
         <div class="sidebar-foot"><div class="who"><div class="avatar">${ic('user')}</div><div style="min-width:0;flex:1"><b class="who-name" style="display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></b><span class="small faint">Tersimpan di Supabase</span></div>
-        <button class="btn icon ghost" id="logout" title="Keluar">${ic('logout')}</button></div></div>
+        <button class="btn icon ghost" id="logout" title="Keluar">${ic('logout')}</button></div>
+        ${isStandalone() ? '' : `<button class="btn" id="install-btn" style="width:100%;margin-top:10px">${ic('download')} Pasang di HP</button>`}</div>
       </aside>
       <div class="overlay"></div>
       <main class="main"><div class="topbar"><button class="btn icon" id="menu-btn" aria-label="Menu">${ic('menu')}</button><b>Rekapan Candy Ress</b></div><div id="page"></div></main>
@@ -1046,6 +1089,7 @@ function renderShell() {
     $('#menu-btn').onclick = () => document.body.classList.toggle('nav-open');
     $('.overlay').onclick = () => document.body.classList.remove('nav-open');
     $('#logout').onclick = () => logout();
+    if ($('#install-btn')) $('#install-btn').onclick = () => installApp();
   }
   const r = route();
   $('.nav').innerHTML = NAV.map(n => `<a href="#/${n.r}" class="${r === n.r ? 'active' : ''}">${ic(n.i)}<span>${n.t}</span></a>`).join('');
@@ -1077,7 +1121,7 @@ PAGES.dashboard = async (page) => {
   const maxDays = Math.max(30, ...d.upcoming.map(a => a.days_left));
   page.innerHTML = `
     <div class="page-head"><div><div class="eyebrow">✨ Rekap · Monitoring</div><h1>Halo${name ? ', ' + esc(name) : ''} 👋</h1><p>${esc(fmtDateLong(d.today))} · ${esc(state.meta.timezone)}</p></div>
-      <div class="inline"><button class="btn" id="d-bulk">${ic('layers')} Bulk Input</button><button class="btn primary" id="d-add">${ic('plus')} Tambah Akun</button></div></div>
+      <div class="inline"><button class="btn icon" id="d-remind" title="Pengingat hari ini" aria-label="Pengingat">${ic('bell')}</button><button class="btn" id="d-bulk">${ic('layers')} Bulk Input</button><button class="btn primary" id="d-add">${ic('plus')} Tambah Akun</button></div></div>
     ${state.me.default_password ? `<div class="alert danger">${ic('alert')}<div>Anda masih memakai password bawaan <b>admin123</b>. <a href="#/pengaturan" data-tab="admin">Ganti sekarang</a> agar data aman.</div></div>` : ''}
     <div class="stats">
       ${card('total', 'Total Data Akun', 'database', '')}
@@ -1111,6 +1155,7 @@ PAGES.dashboard = async (page) => {
       </div>
     </div>`;
   $('#d-add').onclick = () => accountForm();
+  $('#d-remind').onclick = () => showReminder(true);
   $('#d-bulk').onclick = () => bulkForm();
   $$('.stat', page).forEach(el => el.onclick = () => { Object.assign(state.listQuery, { status: el.dataset.status, app: '', q: '', exp_from: '', exp_to: '', page: 1 }); location.hash = '#/akun'; });
   $$('[data-goto-app]', page).forEach(el => el.onclick = () => { Object.assign(state.listQuery, { app: el.dataset.gotoApp, status: '', q: '', page: 1 }); location.hash = '#/akun'; });
